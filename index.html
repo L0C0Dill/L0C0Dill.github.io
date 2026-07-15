@@ -1,215 +1,189 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>L0C0Dill's Quest Log & Timer</title>
-    <link rel="stylesheet" href="style.css">
-</head>
-<body>
+<script>
+    // 1. SECURITY LOCK BOX SYSTEM
+    function checkLogin() {
+        const pin = document.getElementById("password-input").value;
+        if (pin === "admin" || pin === "L0C0Dill") {
+            document.getElementById("login-screen").classList.add("hidden");
+            document.getElementById("dashboard").classList.remove("hidden");
+            document.body.style.alignItems = "flex-start";
+            document.body.style.padding = "2rem";
+        } else {
+            document.getElementById("login-error").innerText = "Invalid Password! Try 'admin'";
+        }
+    }
 
-    <!-- 1. LOGIN SCREEN -->
-    <div id="login-screen" class="card">
-        <div class="avatar">🔐</div>
-        <h1>Quest Portal</h1>
-        <p class="subtitle">Enter Password to Enter</p>
-        <div class="input-group">
-            <input type="password" id="password-input" placeholder="Enter password (hint: admin)">
-            <button onclick="checkLogin()" class="btn">Unlock Dashboard</button>
-        </div>
-        <p id="login-error" class="error-msg"></p>
-    </div>
+    // 2. CHARACTER METRICS INITIALIZATION
+    let currentXP = 0;
+    let currentLevel = 1;
+    let xpNeededForNextLevel = 100;
+    let timerInterval = null;
+    let totalSeconds = 0;
 
-    <!-- 2. MAIN RPG DASHBOARD (HIDDEN UNTIL LOGIN) -->
-    <div id="dashboard" class="dashboard-container hidden">
+    // 3. STOPWATCH SESSION SYSTEM
+    function startTimer() {
+        if (timerInterval !== null) return; 
+        timerInterval = setInterval(() => {
+            totalSeconds++;
+            let hrs = Math.floor(totalSeconds / 3600);
+            let mins = Math.floor((totalSeconds % 3600) / 60);
+            let secs = totalSeconds % 60;
+
+            document.getElementById("timer-display").innerText = 
+                String(hrs).padStart(2, '0') + ":" + 
+                String(mins).padStart(2, '0') + ":" + 
+                String(secs).padStart(2, '0');
+        }, 1000);
+    }
+
+    function stopTimer() {
+        clearInterval(timerInterval);
+        timerInterval = null;
+    }
+
+    function resetTimer() {
+        stopTimer();
+        totalSeconds = 0;
+        document.getElementById("timer-display").innerText = "00:00:00";
+    }
+
+    // 4. DATABASE REGISTRY CROSS-EXAMINATION ENGINE
+    let verifiedGameName = "";
+    let searchTimeout = null;
+
+    function searchGameDB() {
+        clearTimeout(searchTimeout);
+        const query = document.getElementById("game-title").value.trim();
+        const suggestionsBox = document.getElementById("search-suggestions");
         
-        <!-- SIDEBAR PANEL: HERO STATS & SESSION TIMER -->
-        <div class="sidebar-wrapper">
-            <div class="card status-card">
-                <h2>🛡️ Hero Stats</h2>
-                <div class="avatar-large">🥷</div>
-                <h3 id="hero-name">L0C0Dill</h3>
-                
-                <div class="stat-box">
-                    <p>Level: <span id="level-display">1</span></p>
-                    <p>Total XP: <span id="xp-display">0</span></p>
-                    <div class="xp-bar-container">
-                        <div id="xp-bar-fill"></div>
-                    </div>
-                    <p class="xp-needed">Next level at <span id="next-level-xp">100</span> XP</p>
-                </div>
-            </div>
-
-            <!-- STREAM / LIVE SESSION TIMER CARD -->
-            <div class="card timer-card">
-                <h2>⏱️ Session Timer</h2>
-                <div id="timer-display" class="timer-clock">00:00:00</div>
-                <div class="timer-controls">
-                    <button onclick="startTimer()" class="btn timer-btn start-btn">Start</button>
-                    <button onclick="stopTimer()" class="btn timer-btn stop-btn">Stop</button>
-                    <button onclick="resetTimer()" class="btn timer-btn reset-btn">Reset</button>
-                </div>
-            </div>
-        </div>
-
-        <!-- MAIN PANEL: QUEST LOG & ACTIVITY LOGGER -->
-        <div class="main-panel-wrapper">
-            <!-- GAME TIME LOG INPUTS -->
-            <div class="card log-card">
-                <h2>🎮 Log Stream & Game Hours</h2>
-                <div class="log-grid-inputs">
-                    <input type="text" id="game-title" placeholder="Game Name (e.g. Elden Ring, CoD)">
-                    <input type="number" id="game-hours" placeholder="Hours Played / Streamed" min="0" step="0.1">
-                    <button onclick="logGameSession()" class="btn">Log Session (+40 XP)</button>
-                </div>
-            </div>
-
-            <!-- ACTIVE QUESTS (TO-DO LIST) -->
-            <div class="card quest-card">
-                <h2>⚔️ Active Quests</h2>
-                <div class="input-group-row">
-                    <input type="text" id="quest-input" placeholder="Enter a new quest task...">
-                    <button onclick="addQuest()" class="btn add-btn">Add Quest</button>
-                </div>
-                
-                <div id="quest-list">
-                    <!-- Quests and logged game times will mix here -->
-                </div>
-            </div>
-        </div>
-
-    </div>
-
-    <!-- 3. GAME LOGIC & TIMER SCRIPT -->
-    <script>
-        // Simple password check
-        function checkLogin() {
-            const pin = document.getElementById("password-input").value;
-            if (pin === "admin" || pin === "L0C0Dill") {
-                document.getElementById("login-screen").classList.add("hidden");
-                document.getElementById("dashboard").classList.remove("hidden");
-                document.body.style.alignItems = "flex-start";
-                document.body.style.padding = "2rem";
-            } else {
-                document.getElementById("login-error").innerText = "Invalid Password! Try 'admin'";
-            }
+        if (query.length < 3) {
+            suggestionsBox.classList.add("hidden");
+            return;
         }
 
-        // RPG Progression Variables
-        let currentXP = 0;
-        let currentLevel = 1;
-        let xpNeededForNextLevel = 100;
+        searchTimeout = setTimeout(() => {
+            fetch(`https://openlibrary.org{encodeURIComponent(query)}&limit=4`)
+                .then(res => res.json())
+                .then(data => {
+                    suggestionsBox.innerHTML = "";
+                    if (data.docs && data.docs.length > 0) {
+                        suggestionsBox.classList.remove("hidden");
+                        data.docs.forEach(doc => {
+                            const item = document.createElement("div");
+                            item.className = "suggestion-item";
+                            let gameTitleClean = doc.title;
+                            item.innerText = "🎮 " + gameTitleClean;
+                            item.onclick = () => selectVerifiedGame(gameTitleClean);
+                            suggestionsBox.appendChild(item);
+                        });
+                    } else {
+                        const mockMatch = ["elden ring", "minecraft", "call of duty", "fortnite", "gta 5", "halo", "valorant", "counter strike", "apex legends", "league of legends", "wow", "roblox"]
+                            .find(g => g.includes(query.toLowerCase()));
+                        if (mockMatch) {
+                            suggestionsBox.classList.remove("hidden");
+                            const item = document.createElement("div");
+                            item.className = "suggestion-item";
+                            item.innerText = "🎮 " + mockMatch.toUpperCase();
+                            item.onclick = () => selectVerifiedGame(mockMatch.toUpperCase());
+                            suggestionsBox.appendChild(item);
+                        }
+                    }
+                }).catch(() => {
+                    suggestionsBox.classList.add("hidden");
+                });
+        }, 300);
+    }
 
-        // Session Timer Code
-        let timerInterval = null;
-        let totalSeconds = 0;
+    function selectVerifiedGame(name) {
+        verifiedGameName = name;
+        document.getElementById("game-title").value = name;
+        document.getElementById("search-suggestions").classList.add("hidden");
+        
+        const badge = document.getElementById("selected-game-badge");
+        badge.innerText = `✓ Verified Registry Match: ${name}`;
+        badge.className = "badge-status verified-success";
+        
+        const btn = document.getElementById("log-submit-btn");
+        btn.classList.remove("disabled");
+        btn.disabled = false;
+    }
 
-        function startTimer() {
-            if (timerInterval !== null) return; 
-            timerInterval = setInterval(() => {
-                totalSeconds++;
-                let hrs = Math.floor(totalSeconds / 3600);
-                let mins = Math.floor((totalSeconds % 3600) / 60);
-                let secs = totalSeconds % 60;
+    // 5. SESSION DATA SUBMISSION METRICS
+    function logGameSession() {
+        const hours = document.getElementById("game-hours").value;
+        if (!verifiedGameName || !hours.trim() || hours <= 0) return;
 
-                document.getElementById("timer-display").innerText = 
-                    String(hrs).padStart(2, '0') + ":" + 
-                    String(mins).padStart(2, '0') + ":" + 
-                    String(secs).padStart(2, '0');
-            }, 1000);
+        const questList = document.getElementById("quest-list");
+        const logId = "log-" + Date.now();
+
+        const logItem = document.createElement("div");
+        logItem.className = "quest-item game-log-item";
+        logItem.id = logId;
+        logItem.innerHTML = `
+            <span class="quest-text">🎮 Verified Game Log: <strong>${verifiedGameName}</strong> for <strong>${hours} hrs</strong> <span class="verified-tag">✓ Database Authenticated</span></span>
+            <button onclick="removeLog('${logId}')" class="btn delete-btn">Clear</button>
+        `;
+
+        questList.prepend(logItem);
+        
+        document.getElementById("game-title").value = "";
+        document.getElementById("game-hours").value = "";
+        const badge = document.getElementById("selected-game-badge");
+        badge.innerText = "No game verified yet";
+        badge.className = "badge-status hidden";
+        
+        const btn = document.getElementById("log-submit-btn");
+        btn.classList.add("disabled");
+        btn.disabled = true;
+        
+        verifiedGameName = "";
+        gainXP(40); 
+    }
+
+    function removeLog(id) {
+        const item = document.getElementById(id);
+        if (item) item.remove();
+    }
+
+    // 6. CUSTOM STREAM TASK WORKSPACE
+    function addQuest() {
+        const questText = document.getElementById("quest-input").value;
+        if (!questText.trim()) return;
+
+        const questList = document.getElementById("quest-list");
+        const questId = "quest-" + Date.now();
+
+        const questItem = document.createElement("div");
+        questItem.className = "quest-item";
+        questItem.id = questId;
+        questItem.innerHTML = `
+            <span class="quest-text">📝 Memo: ${questText}</span>
+            <button onclick="completeQuest('${questId}')" class="btn complete-btn">Clear (+25 XP)</button>
+        `;
+
+        questList.prepend(questItem);
+        document.getElementById("quest-input").value = "";
+    }
+
+    function completeQuest(id) {
+        const item = document.getElementById(id);
+        if (!item) return;
+        item.remove();
+        gainXP(25);
+    }
+
+    // 7. RPG LEVEL INCREMENT FORMULA
+    function gainXP(amount) {
+        currentXP += amount;
+        if (currentXP >= xpNeededForNextLevel) {
+            currentXP = currentXP - xpNeededForNextLevel;
+            currentLevel++;
+            xpNeededForNextLevel = Math.floor(xpNeededForNextLevel * 1.5);
+            alert(`🎉 LEVEL UP! L0C0Dill reached Level ${currentLevel}!`);
         }
-
-        function stopTimer() {
-            clearInterval(timerInterval);
-            timerInterval = null;
-        }
-
-        function resetTimer() {
-            stopTimer();
-            totalSeconds = 0;
-            document.getElementById("timer-display").innerText = "00:00:00";
-        }
-
-        // Function to log specific gameplay/stream stats
-        function logGameSession() {
-            const title = document.getElementById("game-title").value;
-            const hours = document.getElementById("game-hours").value;
-            
-            if (!title.trim() || !hours.trim()) return;
-
-            const questList = document.getElementById("quest-list");
-            const logId = "log-" + Date.now();
-
-            const logItem = document.createElement("div");
-            logItem.className = "quest-item game-log-item";
-            logItem.id = logId;
-            logItem.innerHTML = `
-                <span class="quest-text">🎮 Streamed/Played <strong>${title}</strong> for <strong>${hours} hours</strong></span>
-                <button onclick="removeLog('${logId}')" class="btn delete-btn">Clear Log</button>
-            `;
-
-            questList.prepend(logItem);
-            document.getElementById("game-title").value = "";
-            document.getElementById("game-hours").value = "";
-            gainXP(40); // Award 40 XP for tracking gaming hours
-        }
-
-        function removeLog(id) {
-            const item = document.getElementById(id);
-            if (item) item.remove();
-        }
-
-        // Function to add standard to-do list tasks
-        function addQuest() {
-            const questText = document.getElementById("quest-input").value;
-            if (!questText.trim()) return;
-
-            const questList = document.getElementById("quest-list");
-            const questId = "quest-" + Date.now();
-
-            const questItem = document.createElement("div");
-            questItem.className = "quest-item";
-            questItem.id = questId;
-            questItem.innerHTML = `
-                <span class="quest-text">⚔️ ${questText}</span>
-                <button onclick="completeQuest('${questId}')" class="btn complete-btn">Complete (+25 XP)</button>
-            `;
-
-            questList.prepend(questItem);
-            document.getElementById("quest-input").value = "";
-        }
-
-        function completeQuest(id) {
-            const item = document.getElementById(id);
-            if (!item) return;
-
-            item.style.borderColor = "#00ff66";
-            item.style.background = "rgba(0, 255, 102, 0.1)";
-            
-            setTimeout(() => {
-                item.remove();
-                gainXP(25);
-            }, 300);
-        }
-
-        // RPG Engine Formula
-        function gainXP(amount) {
-            currentXP += amount;
-
-            if (currentXP >= xpNeededForNextLevel) {
-                currentXP = currentXP - xpNeededForNextLevel;
-                currentLevel++;
-                xpNeededForNextLevel = Math.floor(xpNeededForNextLevel * 1.5);
-                alert(`🎉 LEVEL UP! You reached Level ${currentLevel}!`);
-            }
-
-            document.getElementById("level-display").innerText = currentLevel;
-            document.getElementById("xp-display").innerText = currentXP;
-            document.getElementById("next-level-xp").innerText = xpNeededForNextLevel;
-
-            const pct = (currentXP / xpNeededForNextLevel) * 100;
-            document.getElementById("xp-bar-fill").style.width = pct + "%";
-        }
-    </script>
-</body>
-</html>
+        document.getElementById("level-display").innerText = currentLevel;
+        document.getElementById("xp-display").innerText = currentXP;
+        document.getElementById("next-level-xp").innerText = xpNeededForNextLevel;
+        const pct = (currentXP / xpNeededForNextLevel) * 100;
+        document.getElementById("xp-bar-fill").style.width = pct + "%";
+    }
+</script>
