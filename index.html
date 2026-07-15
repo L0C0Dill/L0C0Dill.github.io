@@ -3,23 +3,136 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>L0C0Dill's Space</title>
+    <title>L0C0Dill's Quest Log</title>
     <link rel="stylesheet" href="style.css">
 </head>
 <body>
 
-    <div class="card">
-        <div class="glow-border"></div>
-        <div class="avatar">🚀</div>
-        <h1>L0C0Dill</h1>
-        <p class="subtitle">Welcome to my corner of the web</p>
-        <p class="description">Building websites straight from my laptop. Check out my links below to see what I'm working on.</p>
-        
-        <div class="links-container">
-            <a href="https://github.com" target="_blank" class="btn">GitHub Profile</a>
-            <a href="#" class="btn secondary">My Projects</a>
+    <!-- 1. LOGIN SCREEN -->
+    <div id="login-screen" class="card">
+        <div class="avatar">🔐</div>
+        <h1>Quest Portal</h1>
+        <p class="subtitle">Enter Password to Enter</p>
+        <div class="input-group">
+            <input type="password" id="password-input" placeholder="Enter password (hint: admin)">
+            <button onclick="checkLogin()" class="btn">Unlock Dashboard</button>
         </div>
+        <p id="login-error" class="error-msg"></p>
     </div>
 
+    <!-- 2. MAIN RPG DASHBOARD (HIDDEN UNTIL LOGIN) -->
+    <div id="dashboard" class="dashboard-container hidden">
+        
+        <!-- SIDEBAR PANEL: CHARACTER STATUS -->
+        <div class="card status-card">
+            <h2>🛡️ Hero Stats</h2>
+            <div class="avatar-large">🥷</div>
+            <h3 id="hero-name">L0C0Dill</h3>
+            
+            <div class="stat-box">
+                <p>Level: <span id="level-display">1</span></p>
+                <p>Total XP: <span id="xp-display">0</span></p>
+                <div class="xp-bar-container">
+                    <div id="xp-bar-fill"></div>
+                </div>
+                <p class="xp-needed">Next level at <span id="next-level-xp">100</span> XP</p>
+            </div>
+        </div>
+
+        <!-- MAIN PANEL: QUEST LOG (TO-DO LIST) -->
+        <div class="card quest-card">
+            <h2>⚔️ Active Quests</h2>
+            <div class="input-group-row">
+                <input type="text" id="quest-input" placeholder="Enter a new quest task...">
+                <button onclick="addQuest()" class="btn add-btn">Add Quest</button>
+            </div>
+            
+            <div id="quest-list">
+                <!-- Quests will appear here dynamically -->
+            </div>
+        </div>
+
+    </div>
+
+    <!-- 3. GAME LOGIC SCRIPT -->
+    <script>
+        // Simple password check
+        function checkLogin() {
+            const pin = document.getElementById("password-input").value;
+            if (pin === "admin" || pin === "L0C0Dill") {
+                document.getElementById("login-screen").classList.add("hidden");
+                document.getElementById("dashboard").classList.remove("hidden");
+                document.body.style.alignItems = "flex-start";
+                document.body.style.padding = "2rem";
+            } else {
+                document.getElementById("login-error").innerText = "Invalid Password! Try 'admin'";
+            }
+        }
+
+        // RPG Progression Variables
+        let currentXP = 0;
+        let currentLevel = 1;
+        let xpNeededForNextLevel = 100;
+
+        // Function to add a new quest to the list
+        function addQuest() {
+            const questText = document.getElementById("quest-input").value;
+            if (!questText.trim()) return;
+
+            const questList = document.getElementById("quest-list");
+            
+            // Create a unique ID for the quest container
+            const questId = "quest-" + Date.now();
+
+            const questItem = document.createElement("div");
+            questItem.className = "quest-item";
+            questItem.id = questId;
+            questItem.innerHTML = `
+                <span class="quest-text">${questText}</span>
+                <button onclick="completeQuest('${questId}')" class="btn complete-btn">Complete (+25 XP)</button>
+            `;
+
+            questList.prepend(questItem);
+            document.getElementById("quest-input").value = "";
+        }
+
+        // Function to handle quest completion and award XP
+        function completeQuest(id) {
+            const item = document.getElementById(id);
+            if (!item) return;
+
+            // Flash green animation effect before removing
+            item.style.borderColor = "#00ff66";
+            item.style.background = "rgba(0, 255, 102, 0.1)";
+            
+            setTimeout(() => {
+                item.remove();
+                gainXP(25); // Award 25 XP per completed task
+            }, 300);
+        }
+
+        // Progression Engine logic
+        function gainXP(amount) {
+            currentXP += amount;
+
+            // Check for level up
+            if (currentXP >= xpNeededForNextLevel) {
+                currentXP = currentXP - xpNeededForNextLevel; // Carry over leftover XP
+                currentLevel++;
+                xpNeededForNextLevel = Math.floor(xpNeededForNextLevel * 1.5); // Increase difficulty next level
+                alert(`🎉 LEVEL UP! You reached Level ${currentLevel}!`);
+            }
+
+            // Update UI elements on screen
+            document.getElementById("level-display").innerText = currentLevel;
+            document.getElementById("xp-display").innerText = currentXP;
+            document.getElementById("next-level-xp").innerText = xpNeededForNextLevel;
+
+            // Calculate fill bar percentage
+            const pct = (currentXP / xpNeededForNextLevel) * 100;
+            document.getElementById("xp-bar-fill").style.width = pct + "%";
+        }
+    </script>
 </body>
 </html>
+
