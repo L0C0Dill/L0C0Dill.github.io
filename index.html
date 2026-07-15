@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>L0C0Dill's Quest Log</title>
+    <title>L0C0Dill's Quest Log & Timer</title>
     <link rel="stylesheet" href="style.css">
 </head>
 <body>
@@ -23,38 +23,64 @@
     <!-- 2. MAIN RPG DASHBOARD (HIDDEN UNTIL LOGIN) -->
     <div id="dashboard" class="dashboard-container hidden">
         
-        <!-- SIDEBAR PANEL: CHARACTER STATUS -->
-        <div class="card status-card">
-            <h2>🛡️ Hero Stats</h2>
-            <div class="avatar-large">🥷</div>
-            <h3 id="hero-name">L0C0Dill</h3>
-            
-            <div class="stat-box">
-                <p>Level: <span id="level-display">1</span></p>
-                <p>Total XP: <span id="xp-display">0</span></p>
-                <div class="xp-bar-container">
-                    <div id="xp-bar-fill"></div>
+        <!-- SIDEBAR PANEL: HERO STATS & SESSION TIMER -->
+        <div class="sidebar-wrapper">
+            <div class="card status-card">
+                <h2>🛡️ Hero Stats</h2>
+                <div class="avatar-large">🥷</div>
+                <h3 id="hero-name">L0C0Dill</h3>
+                
+                <div class="stat-box">
+                    <p>Level: <span id="level-display">1</span></p>
+                    <p>Total XP: <span id="xp-display">0</span></p>
+                    <div class="xp-bar-container">
+                        <div id="xp-bar-fill"></div>
+                    </div>
+                    <p class="xp-needed">Next level at <span id="next-level-xp">100</span> XP</p>
                 </div>
-                <p class="xp-needed">Next level at <span id="next-level-xp">100</span> XP</p>
+            </div>
+
+            <!-- STREAM / LIVE SESSION TIMER CARD -->
+            <div class="card timer-card">
+                <h2>⏱️ Session Timer</h2>
+                <div id="timer-display" class="timer-clock">00:00:00</div>
+                <div class="timer-controls">
+                    <button onclick="startTimer()" class="btn timer-btn start-btn">Start</button>
+                    <button onclick="stopTimer()" class="btn timer-btn stop-btn">Stop</button>
+                    <button onclick="resetTimer()" class="btn timer-btn reset-btn">Reset</button>
+                </div>
             </div>
         </div>
 
-        <!-- MAIN PANEL: QUEST LOG (TO-DO LIST) -->
-        <div class="card quest-card">
-            <h2>⚔️ Active Quests</h2>
-            <div class="input-group-row">
-                <input type="text" id="quest-input" placeholder="Enter a new quest task...">
-                <button onclick="addQuest()" class="btn add-btn">Add Quest</button>
+        <!-- MAIN PANEL: QUEST LOG & ACTIVITY LOGGER -->
+        <div class="main-panel-wrapper">
+            <!-- GAME TIME LOG INPUTS -->
+            <div class="card log-card">
+                <h2>🎮 Log Stream & Game Hours</h2>
+                <div class="log-grid-inputs">
+                    <input type="text" id="game-title" placeholder="Game Name (e.g. Elden Ring, CoD)">
+                    <input type="number" id="game-hours" placeholder="Hours Played / Streamed" min="0" step="0.1">
+                    <button onclick="logGameSession()" class="btn">Log Session (+40 XP)</button>
+                </div>
             </div>
-            
-            <div id="quest-list">
-                <!-- Quests will appear here dynamically -->
+
+            <!-- ACTIVE QUESTS (TO-DO LIST) -->
+            <div class="card quest-card">
+                <h2>⚔️ Active Quests</h2>
+                <div class="input-group-row">
+                    <input type="text" id="quest-input" placeholder="Enter a new quest task...">
+                    <button onclick="addQuest()" class="btn add-btn">Add Quest</button>
+                </div>
+                
+                <div id="quest-list">
+                    <!-- Quests and logged game times will mix here -->
+                </div>
             </div>
         </div>
 
     </div>
 
-    <!-- 3. GAME LOGIC SCRIPT -->
+    <!-- 3. GAME LOGIC & TIMER SCRIPT -->
     <script>
         // Simple password check
         function checkLogin() {
@@ -74,21 +100,78 @@
         let currentLevel = 1;
         let xpNeededForNextLevel = 100;
 
-        // Function to add a new quest to the list
+        // Session Timer Code
+        let timerInterval = null;
+        let totalSeconds = 0;
+
+        function startTimer() {
+            if (timerInterval !== null) return; 
+            timerInterval = setInterval(() => {
+                totalSeconds++;
+                let hrs = Math.floor(totalSeconds / 3600);
+                let mins = Math.floor((totalSeconds % 3600) / 60);
+                let secs = totalSeconds % 60;
+
+                document.getElementById("timer-display").innerText = 
+                    String(hrs).padStart(2, '0') + ":" + 
+                    String(mins).padStart(2, '0') + ":" + 
+                    String(secs).padStart(2, '0');
+            }, 1000);
+        }
+
+        function stopTimer() {
+            clearInterval(timerInterval);
+            timerInterval = null;
+        }
+
+        function resetTimer() {
+            stopTimer();
+            totalSeconds = 0;
+            document.getElementById("timer-display").innerText = "00:00:00";
+        }
+
+        // Function to log specific gameplay/stream stats
+        function logGameSession() {
+            const title = document.getElementById("game-title").value;
+            const hours = document.getElementById("game-hours").value;
+            
+            if (!title.trim() || !hours.trim()) return;
+
+            const questList = document.getElementById("quest-list");
+            const logId = "log-" + Date.now();
+
+            const logItem = document.createElement("div");
+            logItem.className = "quest-item game-log-item";
+            logItem.id = logId;
+            logItem.innerHTML = `
+                <span class="quest-text">🎮 Streamed/Played <strong>${title}</strong> for <strong>${hours} hours</strong></span>
+                <button onclick="removeLog('${logId}')" class="btn delete-btn">Clear Log</button>
+            `;
+
+            questList.prepend(logItem);
+            document.getElementById("game-title").value = "";
+            document.getElementById("game-hours").value = "";
+            gainXP(40); // Award 40 XP for tracking gaming hours
+        }
+
+        function removeLog(id) {
+            const item = document.getElementById(id);
+            if (item) item.remove();
+        }
+
+        // Function to add standard to-do list tasks
         function addQuest() {
             const questText = document.getElementById("quest-input").value;
             if (!questText.trim()) return;
 
             const questList = document.getElementById("quest-list");
-            
-            // Create a unique ID for the quest container
             const questId = "quest-" + Date.now();
 
             const questItem = document.createElement("div");
             questItem.className = "quest-item";
             questItem.id = questId;
             questItem.innerHTML = `
-                <span class="quest-text">${questText}</span>
+                <span class="quest-text">⚔️ ${questText}</span>
                 <button onclick="completeQuest('${questId}')" class="btn complete-btn">Complete (+25 XP)</button>
             `;
 
@@ -96,43 +179,37 @@
             document.getElementById("quest-input").value = "";
         }
 
-        // Function to handle quest completion and award XP
         function completeQuest(id) {
             const item = document.getElementById(id);
             if (!item) return;
 
-            // Flash green animation effect before removing
             item.style.borderColor = "#00ff66";
             item.style.background = "rgba(0, 255, 102, 0.1)";
             
             setTimeout(() => {
                 item.remove();
-                gainXP(25); // Award 25 XP per completed task
+                gainXP(25);
             }, 300);
         }
 
-        // Progression Engine logic
+        // RPG Engine Formula
         function gainXP(amount) {
             currentXP += amount;
 
-            // Check for level up
             if (currentXP >= xpNeededForNextLevel) {
-                currentXP = currentXP - xpNeededForNextLevel; // Carry over leftover XP
+                currentXP = currentXP - xpNeededForNextLevel;
                 currentLevel++;
-                xpNeededForNextLevel = Math.floor(xpNeededForNextLevel * 1.5); // Increase difficulty next level
+                xpNeededForNextLevel = Math.floor(xpNeededForNextLevel * 1.5);
                 alert(`🎉 LEVEL UP! You reached Level ${currentLevel}!`);
             }
 
-            // Update UI elements on screen
             document.getElementById("level-display").innerText = currentLevel;
             document.getElementById("xp-display").innerText = currentXP;
             document.getElementById("next-level-xp").innerText = xpNeededForNextLevel;
 
-            // Calculate fill bar percentage
             const pct = (currentXP / xpNeededForNextLevel) * 100;
             document.getElementById("xp-bar-fill").style.width = pct + "%";
         }
     </script>
 </body>
 </html>
-
