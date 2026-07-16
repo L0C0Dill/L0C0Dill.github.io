@@ -1,189 +1,292 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Game / Stream Counter</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <header>
+    <h1>Game & Stream Counter</h1>
+    <p class="tagline">Log played games, count streams, run a timer, and verify entries.</p>
+  </header>
+
+  <main class="container">
+    <section class="panel">
+      <h2>Stream Controls</h2>
+      <div class="row">
+        <div>
+          <button id="newStreamBtn">New Stream</button>
+          <button id="resetStreamsBtn">Reset Streams</button>
+        </div>
+        <div class="counter">Streams: <span id="streamCount">0</span></div>
+      </div>
+    </section>
+
+    <section class="panel">
+      <h2>Timer</h2>
+      <div class="timer">
+        <div id="timerDisplay">00:00:00</div>
+        <div class="row">
+          <button id="startBtn">Start</button>
+          <button id="pauseBtn">Pause</button>
+          <button id="resetBtn">Reset</button>
+          <button id="attachTimeBtn" title="Attach elapsed time to the current stream entry (if one is being edited)">Attach Time to Entry</button>
+        </div>
+      </div>
+    </section>
+
+    <section class="panel">
+      <h2>Add Game Entry</h2>
+      <form id="gameForm">
+        <label>Game name
+          <input type="text" id="gameName" placeholder="Enter game title" required />
+        </label>
+        <label>Duration (optional)
+          <input type="text" id="gameDuration" placeholder="e.g. 1:20 or leave blank to attach timer" />
+        </label>
+        <div class="row">
+          <button type="submit">Add to Log</button>
+          <button type="button" id="verifyBtn">Verify</button>
+        </div>
+        <div id="verifyResults" class="verify-results" aria-live="polite"></div>
+      </form>
+    </section>
+
+    <section class="panel">
+      <h2>Log</h2>
+      <div class="row">
+        <button id="clearLogBtn">Clear Log</button>
+        <button id="exportBtn">Export JSON</button>
+        <button id="importBtn">Import JSON</button>
+      </div>
+      <ul id="logList" class="log-list"></ul>
+
+      <div id="importArea" class="import-area hidden">
+        <textarea id="importTextarea" placeholder='Paste JSON here'></textarea>
+        <div class="row">
+          <button id="doImportBtn">Import</button>
+          <button id="cancelImportBtn">Cancel</button>
+        </div>
+      </div>
+    </section>
+
+    <footer>
+      <p>Verification is local: suggestions come from a built-in list and a quick web search link if you want to look it up online.</p>
+    </footer>
+  </main>
+
 <script>
-    // 1. SECURITY LOCK BOX SYSTEM
-    function checkLogin() {
-        const pin = document.getElementById("password-input").value;
-        if (pin === "admin" || pin === "L0C0Dill") {
-            document.getElementById("login-screen").classList.add("hidden");
-            document.getElementById("dashboard").classList.remove("hidden");
-            document.body.style.alignItems = "flex-start";
-            document.body.style.padding = "2rem";
-        } else {
-            document.getElementById("login-error").innerText = "Invalid Password! Try 'admin'";
-        }
+// Simple single-file app. Data stored in localStorage so it works offline.
+const STORAGE_KEY = 'gameLogs_v1';
+const STREAM_KEY = 'streamCount_v1';
+const TIMER_KEY = 'timerState_v1';
+
+// A small local list of known games to help verification. Extend as needed.
+const knownGames = [
+  'The Legend of Zelda: Breath of the Wild',
+  'Elden Ring',
+  'Minecraft',
+  'Fortnite',
+  'Overwatch',
+  'Hollow Knight',
+  'Stardew Valley',
+  'Hades',
+  'Animal Crossing: New Horizons',
+  'Skyrim',
+  'Cyberpunk 2077',
+  'Dark Souls III',
+  'Persona 5',
+  'Super Mario Odyssey'
+];
+
+let logs = [];
+let streamCount = 0;
+
+// Timer state
+let timer = {
+  running: false,
+  startAt: null, // timestamp when started
+  elapsedBefore: 0 // ms
+};
+let timerInterval = null;
+
+// Utility
+function $(id) { return document.getElementById(id); }
+function saveState() {
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(logs));
+    localStorage.setItem(STREAM_KEY, String(streamCount));
+    localStorage.setItem(TIMER_KEY, JSON.stringify(timer));
+  } catch (e) {
+    console.warn('Could not save to localStorage', e);
+  }
+}
+function loadState() {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    logs = raw ? JSON.parse(raw) : [];
+    streamCount = parseInt(localStorage.getItem(STREAM_KEY) || '0', 10);
+    const rawTimer = localStorage.getItem(TIMER_KEY);
+    timer = rawTimer ? JSON.parse(rawTimer) : timer;
+  } catch (e) {
+    console.warn('Could not load from localStorage', e);
+  }
+}
+
+function render() {
+  $('logList').innerHTML = '';
+  logs.forEach((entry, idx) => {
+    const li = document.createElement('li');
+    li.className = 'log-item';
+    const meta = document.createElement('div');
+    meta.className = 'meta';
+    meta.innerHTML = `<strong>${escapeHtml(entry.name)}</strong> <span class="tag">${escapeHtml(entry.duration || '')}</span>`;
+    const info = document.createElement('div');
+    info.className = 'info';
+    info.textContent = `Added: ${new Date(entry.addedAt).toLocaleString()}`;
+    if (entry.verified) {
+      const v = document.createElement('span'); v.className = 'verified'; v.textContent = 'Verified';
+      meta.appendChild(v);
+    } else {
+      const verifyBadge = document.createElement('button');
+      verifyBadge.textContent = 'Mark verified';
+      verifyBadge.className = 'small-btn';
+      verifyBadge.addEventListener('click', () => { logs[idx].verified = true; saveState(); render(); });
+      meta.appendChild(verifyBadge);
     }
 
-    // 2. CHARACTER METRICS INITIALIZATION
-    let currentXP = 0;
-    let currentLevel = 1;
-    let xpNeededForNextLevel = 100;
-    let timerInterval = null;
-    let totalSeconds = 0;
+    const controls = document.createElement('div');
+    controls.className = 'controls';
+    const removeBtn = document.createElement('button');
+    removeBtn.textContent = 'Remove';
+    removeBtn.addEventListener('click', () => { logs.splice(idx,1); saveState(); render(); });
+    controls.appendChild(removeBtn);
 
-    // 3. STOPWATCH SESSION SYSTEM
-    function startTimer() {
-        if (timerInterval !== null) return; 
-        timerInterval = setInterval(() => {
-            totalSeconds++;
-            let hrs = Math.floor(totalSeconds / 3600);
-            let mins = Math.floor((totalSeconds % 3600) / 60);
-            let secs = totalSeconds % 60;
+    li.appendChild(meta);
+    li.appendChild(info);
+    li.appendChild(controls);
+    $('logList').appendChild(li);
+  });
 
-            document.getElementById("timer-display").innerText = 
-                String(hrs).padStart(2, '0') + ":" + 
-                String(mins).padStart(2, '0') + ":" + 
-                String(secs).padStart(2, '0');
-        }, 1000);
-    }
+  $('streamCount').textContent = streamCount;
+}
 
-    function stopTimer() {
-        clearInterval(timerInterval);
-        timerInterval = null;
-    }
+function escapeHtml(s){ return String(s).replace(/[&<>"']/g, (c)=> ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":"&#39;"})[c]); }
 
-    function resetTimer() {
-        stopTimer();
-        totalSeconds = 0;
-        document.getElementById("timer-display").innerText = "00:00:00";
-    }
+// Form handling
+$('gameForm').addEventListener('submit', (e) => {
+  e.preventDefault();
+  const name = $('gameName').value.trim();
+  if (!name) return;
+  let duration = $('gameDuration').value.trim();
+  if (!duration && (timer.elapsedBefore || timer.running)) {
+    // If timer has some elapsed time, use it
+    duration = msToHMS(timer.elapsedBefore + (timer.running ? (Date.now() - timer.startAt) : 0));
+  }
+  const entry = { name, duration, addedAt: Date.now(), verified: false };
+  logs.unshift(entry);
+  saveState(); render();
+  $('gameForm').reset();
+});
 
-    // 4. DATABASE REGISTRY CROSS-EXAMINATION ENGINE
-    let verifiedGameName = "";
-    let searchTimeout = null;
+// Verification: simple local suggestions + quick web search option
+$('verifyBtn').addEventListener('click', () => {
+  const q = $('gameName').value.trim();
+  showVerifyResults(q);
+});
 
-    function searchGameDB() {
-        clearTimeout(searchTimeout);
-        const query = document.getElementById("game-title").value.trim();
-        const suggestionsBox = document.getElementById("search-suggestions");
-        
-        if (query.length < 3) {
-            suggestionsBox.classList.add("hidden");
-            return;
-        }
+function showVerifyResults(query) {
+  const container = $('verifyResults');
+  container.innerHTML = '';
+  if (!query) { container.textContent = 'Type a game name to get suggestions.'; return; }
+  const qlc = query.toLowerCase();
+  const matches = knownGames.filter(g => g.toLowerCase().includes(qlc));
+  if (matches.length) {
+    const list = document.createElement('ul');
+    matches.forEach(m => {
+      const li = document.createElement('li');
+      const btn = document.createElement('button');
+      btn.textContent = m;
+      btn.addEventListener('click', () => { $('gameName').value = m; container.innerHTML = `<div class="suggested">Selected: ${escapeHtml(m)}</div>`; });
+      li.appendChild(btn);
+      list.appendChild(li);
+    });
+    container.appendChild(list);
+  } else {
+    container.innerHTML = `<div>No local matches.</div><div class="search-links">Try a quick web search: <a href="https://www.bing.com/search?q=${encodeURIComponent(query)}" target="_blank" rel="noopener">Search web for '${escapeHtml(query)}'</a></div>`;
+  }
+}
 
-        searchTimeout = setTimeout(() => {
-            fetch(`https://openlibrary.org{encodeURIComponent(query)}&limit=4`)
-                .then(res => res.json())
-                .then(data => {
-                    suggestionsBox.innerHTML = "";
-                    if (data.docs && data.docs.length > 0) {
-                        suggestionsBox.classList.remove("hidden");
-                        data.docs.forEach(doc => {
-                            const item = document.createElement("div");
-                            item.className = "suggestion-item";
-                            let gameTitleClean = doc.title;
-                            item.innerText = "🎮 " + gameTitleClean;
-                            item.onclick = () => selectVerifiedGame(gameTitleClean);
-                            suggestionsBox.appendChild(item);
-                        });
-                    } else {
-                        const mockMatch = ["elden ring", "minecraft", "call of duty", "fortnite", "gta 5", "halo", "valorant", "counter strike", "apex legends", "league of legends", "wow", "roblox"]
-                            .find(g => g.includes(query.toLowerCase()));
-                        if (mockMatch) {
-                            suggestionsBox.classList.remove("hidden");
-                            const item = document.createElement("div");
-                            item.className = "suggestion-item";
-                            item.innerText = "🎮 " + mockMatch.toUpperCase();
-                            item.onclick = () => selectVerifiedGame(mockMatch.toUpperCase());
-                            suggestionsBox.appendChild(item);
-                        }
-                    }
-                }).catch(() => {
-                    suggestionsBox.classList.add("hidden");
-                });
-        }, 300);
-    }
+// Stream controls
+$('newStreamBtn').addEventListener('click', () => { streamCount++; saveState(); render(); });
+$('resetStreamsBtn').addEventListener('click', () => { if (confirm('Reset stream count to 0?')) { streamCount = 0; saveState(); render(); }});
 
-    function selectVerifiedGame(name) {
-        verifiedGameName = name;
-        document.getElementById("game-title").value = name;
-        document.getElementById("search-suggestions").classList.add("hidden");
-        
-        const badge = document.getElementById("selected-game-badge");
-        badge.innerText = `✓ Verified Registry Match: ${name}`;
-        badge.className = "badge-status verified-success";
-        
-        const btn = document.getElementById("log-submit-btn");
-        btn.classList.remove("disabled");
-        btn.disabled = false;
-    }
+// Log controls
+$('clearLogBtn').addEventListener('click', () => { if (confirm('Clear the entire log?')){ logs = []; saveState(); render(); }});
+$('exportBtn').addEventListener('click', () => { const data = { logs, streamCount, timer }; const blob = new Blob([JSON.stringify(data, null, 2)], {type:'application/json'}); const url = URL.createObjectURL(blob); const a = document.createElement('a'); a.href = url; a.download = 'game_log.json'; document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url); });
+$('importBtn').addEventListener('click', () => { $('importArea').classList.remove('hidden'); });
+$('cancelImportBtn').addEventListener('click', () => { $('importArea').classList.add('hidden'); $('importTextarea').value = ''; });
+$('doImportBtn').addEventListener('click', () => {
+  try {
+    const parsed = JSON.parse($('importTextarea').value);
+    if (parsed.logs && Array.isArray(parsed.logs)) logs = parsed.logs;
+    if (typeof parsed.streamCount === 'number') streamCount = parsed.streamCount;
+    saveState(); render(); $('importArea').classList.add('hidden'); $('importTextarea').value = '';
+    alert('Imported');
+  } catch (err) { alert('Invalid JSON'); }
+});
 
-    // 5. SESSION DATA SUBMISSION METRICS
-    function logGameSession() {
-        const hours = document.getElementById("game-hours").value;
-        if (!verifiedGameName || !hours.trim() || hours <= 0) return;
+// Timer functions
+$('startBtn').addEventListener('click', () => { startTimer(); });
+$('pauseBtn').addEventListener('click', () => { pauseTimer(); });
+$('resetBtn').addEventListener('click', () => { resetTimer(); });
+$('attachTimeBtn').addEventListener('click', () => { attachTimeToTopEntry(); });
 
-        const questList = document.getElementById("quest-list");
-        const logId = "log-" + Date.now();
+function startTimer() {
+  if (timer.running) return;
+  timer.running = true;
+  timer.startAt = Date.now();
+  saveState();
+  tickTimer();
+  timerInterval = setInterval(tickTimer, 250);
+}
+function pauseTimer() {
+  if (!timer.running) return;
+  timer.elapsedBefore += Date.now() - timer.startAt;
+  timer.running = false;
+  timer.startAt = null;
+  clearInterval(timerInterval); timerInterval = null;
+  saveState();
+  tickTimer();
+}
+function resetTimer() {
+  timer.running = false; timer.startAt = null; timer.elapsedBefore = 0; clearInterval(timerInterval); timerInterval = null; saveState(); tickTimer();
+}
+function tickTimer() {
+  const ms = timer.elapsedBefore + (timer.running ? (Date.now() - timer.startAt) : 0);
+  $('timerDisplay').textContent = msToHMS(ms);
+}
+function msToHMS(ms) {
+  const total = Math.floor(ms/1000);
+  const s = total % 60; const m = Math.floor((total/60)) % 60; const h = Math.floor(total/3600);
+  return [h,m,s].map(n=>String(n).padStart(2,'0')).join(':');
+}
 
-        const logItem = document.createElement("div");
-        logItem.className = "quest-item game-log-item";
-        logItem.id = logId;
-        logItem.innerHTML = `
-            <span class="quest-text">🎮 Verified Game Log: <strong>${verifiedGameName}</strong> for <strong>${hours} hrs</strong> <span class="verified-tag">✓ Database Authenticated</span></span>
-            <button onclick="removeLog('${logId}')" class="btn delete-btn">Clear</button>
-        `;
+function attachTimeToTopEntry(){
+  if (!logs.length) return alert('No entries in the log to attach to.');
+  const ms = timer.elapsedBefore + (timer.running ? (Date.now() - timer.startAt) : 0);
+  logs[0].duration = msToHMS(ms);
+  saveState(); render();
+}
 
-        questList.prepend(logItem);
-        
-        document.getElementById("game-title").value = "";
-        document.getElementById("game-hours").value = "";
-        const badge = document.getElementById("selected-game-badge");
-        badge.innerText = "No game verified yet";
-        badge.className = "badge-status hidden";
-        
-        const btn = document.getElementById("log-submit-btn");
-        btn.classList.add("disabled");
-        btn.disabled = true;
-        
-        verifiedGameName = "";
-        gainXP(40); 
-    }
+// Init
+loadState(); render(); tickTimer();
 
-    function removeLog(id) {
-        const item = document.getElementById(id);
-        if (item) item.remove();
-    }
+// Basic export safety: keep app usable even if localStorage is missing
+window.addEventListener('beforeunload', saveState);
 
-    // 6. CUSTOM STREAM TASK WORKSPACE
-    function addQuest() {
-        const questText = document.getElementById("quest-input").value;
-        if (!questText.trim()) return;
-
-        const questList = document.getElementById("quest-list");
-        const questId = "quest-" + Date.now();
-
-        const questItem = document.createElement("div");
-        questItem.className = "quest-item";
-        questItem.id = questId;
-        questItem.innerHTML = `
-            <span class="quest-text">📝 Memo: ${questText}</span>
-            <button onclick="completeQuest('${questId}')" class="btn complete-btn">Clear (+25 XP)</button>
-        `;
-
-        questList.prepend(questItem);
-        document.getElementById("quest-input").value = "";
-    }
-
-    function completeQuest(id) {
-        const item = document.getElementById(id);
-        if (!item) return;
-        item.remove();
-        gainXP(25);
-    }
-
-    // 7. RPG LEVEL INCREMENT FORMULA
-    function gainXP(amount) {
-        currentXP += amount;
-        if (currentXP >= xpNeededForNextLevel) {
-            currentXP = currentXP - xpNeededForNextLevel;
-            currentLevel++;
-            xpNeededForNextLevel = Math.floor(xpNeededForNextLevel * 1.5);
-            alert(`🎉 LEVEL UP! L0C0Dill reached Level ${currentLevel}!`);
-        }
-        document.getElementById("level-display").innerText = currentLevel;
-        document.getElementById("xp-display").innerText = currentXP;
-        document.getElementById("next-level-xp").innerText = xpNeededForNextLevel;
-        const pct = (currentXP / xpNeededForNextLevel) * 100;
-        document.getElementById("xp-bar-fill").style.width = pct + "%";
-    }
 </script>
+</body>
+</html>
