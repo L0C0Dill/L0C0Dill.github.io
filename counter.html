@@ -1,0 +1,292 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Game / Stream Counter</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <header>
+    <h1>Game & Stream Counter</h1>
+    <p class="tagline">Log played games, count streams, run a timer, and verify entries.</p>
+  </header>
+
+  <main class="container">
+    <section class="panel">
+      <h2>Stream Controls</h2>
+      <div class="row">
+        <div>
+          <button id="newStreamBtn">New Stream</button>
+          <button id="resetStreamsBtn">Reset Streams</button>
+        </div>
+        <div class="counter">Streams: <span id="streamCount">0</span></div>
+      </div>
+    </section>
+
+    <section class="panel">
+      <h2>Timer</h2>
+      <div class="timer">
+        <div id="timerDisplay">00:00:00</div>
+        <div class="row">
+          <button id="startBtn">Start</button>
+          <button id="pauseBtn">Pause</button>
+          <button id="resetBtn">Reset</button>
+          <button id="attachTimeBtn" title="Attach elapsed time to the current stream entry (if one is being edited)">Attach Time to Entry</button>
+        </div>
+      </div>
+    </section>
+
+    <section class="panel">
+      <h2>Add Game Entry</h2>
+      <form id="gameForm">
+        <label>Game name
+          <input type="text" id="gameName" placeholder="Enter game title" required />
+        </label>
+        <label>Duration (optional)
+          <input type="text" id="gameDuration" placeholder="e.g. 1:20 or leave blank to attach timer" />
+        </label>
+        <div class="row">
+          <button type="submit">Add to Log</button>
+          <button type="button" id="verifyBtn">Verify</button>
+        </div>
+        <div id="verifyResults" class="verify-results" aria-live="polite"></div>
+      </form>
+    </section>
+
+    <section class="panel">
+      <h2>Log</h2>
+      <div class="row">
+        <button id="clearLogBtn">Clear Log</button>
+        <button id="exportBtn">Export JSON</button>
+        <button id="importBtn">Import JSON</button>
+      </div>
+      <ul id="logList" class="log-list"></ul>
+
+      <div id="importArea" class="import-area hidden">
+        <textarea id="importTextarea" placeholder='Paste JSON here'></textarea>
+        <div class="row">
+          <button id="doImportBtn">Import</button>
+          <button id="cancelImportBtn">Cancel</button>
+        </div>
+      </div>
+    </section>
+
+    <footer>
+      <p>Verification is local: suggestions come from a built-in list and a quick web search link if you want to look it up online.</p>
+    </footer>
+  </main>
+
+<script>
+// Simple single-file app. Data stored in localStorage so it works offline.
+const STORAGE_KEY = 'gameLogs_v1';
+const STREAM_KEY = 'streamCount_v1';
+const TIMER_KEY = 'timerState_v1';
+
+// A small local list of known games to help verification. Extend as needed.
+const knownGames = [
+  'The Legend of Zelda: Breath of the Wild',
+  'Elden Ring',
+  'Minecraft',
+  'Fortnite',
+  'Overwatch',
+  'Hollow Knight',
+  'Stardew Valley',
+  'Hades',
+  'Animal Crossing: New Horizons',
+  'Skyrim',
+  'Cyberpunk 2077',
+  'Dark Souls III',
+  'Persona 5',
+  'Super Mario Odyssey'
+];
+
+let logs = [];
+let streamCount = 0;
+
+// Timer state
+let timer = {
+  running: false,
+  startAt: null, // timestamp when started
+  elapsedBefore: 0 // ms
+};
+let timerInterval = null;
+
+// Utility
+function $(id) { return document.getElementById(id); }
+function saveState() {
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(logs));
+    localStorage.setItem(STREAM_KEY, String(streamCount));
+    localStorage.setItem(TIMER_KEY, JSON.stringify(timer));
+  } catch (e) {
+    console.warn('Could not save to localStorage', e);
+  }
+}
+function loadState() {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    logs = raw ? JSON.parse(raw) : [];
+    streamCount = parseInt(localStorage.getItem(STREAM_KEY) || '0', 10);
+    const rawTimer = localStorage.getItem(TIMER_KEY);
+    timer = rawTimer ? JSON.parse(rawTimer) : timer;
+  } catch (e) {
+    console.warn('Could not load from localStorage', e);
+  }
+}
+
+function render() {
+  $('logList').innerHTML = '';
+  logs.forEach((entry, idx) => {
+    const li = document.createElement('li');
+    li.className = 'log-item';
+    const meta = document.createElement('div');
+    meta.className = 'meta';
+    meta.innerHTML = `<strong>${escapeHtml(entry.name)}</strong> <span class="tag">${escapeHtml(entry.duration || '')}</span>`;
+    const info = document.createElement('div');
+    info.className = 'info';
+    info.textContent = `Added: ${new Date(entry.addedAt).toLocaleString()}`;
+    if (entry.verified) {
+      const v = document.createElement('span'); v.className = 'verified'; v.textContent = 'Verified';
+      meta.appendChild(v);
+    } else {
+      const verifyBadge = document.createElement('button');
+      verifyBadge.textContent = 'Mark verified';
+      verifyBadge.className = 'small-btn';
+      verifyBadge.addEventListener('click', () => { logs[idx].verified = true; saveState(); render(); });
+      meta.appendChild(verifyBadge);
+    }
+
+    const controls = document.createElement('div');
+    controls.className = 'controls';
+    const removeBtn = document.createElement('button');
+    removeBtn.textContent = 'Remove';
+    removeBtn.addEventListener('click', () => { logs.splice(idx,1); saveState(); render(); });
+    controls.appendChild(removeBtn);
+
+    li.appendChild(meta);
+    li.appendChild(info);
+    li.appendChild(controls);
+    $('logList').appendChild(li);
+  });
+
+  $('streamCount').textContent = streamCount;
+}
+
+function escapeHtml(s){ return String(s).replace(/[&<>\"']/g, (c)=> ({'&':'&amp;','<':'&lt;','>':'&gt;','\"':'&quot;',"'":"&#39;"})[c]); }
+
+// Form handling
+$('gameForm').addEventListener('submit', (e) => {
+  e.preventDefault();
+  const name = $('gameName').value.trim();
+  if (!name) return;
+  let duration = $('gameDuration').value.trim();
+  if (!duration && timer.elapsedBefore) {
+    // If timer has some elapsed time, use it
+    duration = msToHMS(timer.elapsedBefore + (timer.running ? (Date.now() - timer.startAt) : 0));
+  }
+  const entry = { name, duration, addedAt: Date.now(), verified: false };
+  logs.unshift(entry);
+  saveState(); render();
+  $('gameForm').reset();
+});
+
+// Verification: simple local suggestions + quick web search option
+$('verifyBtn').addEventListener('click', () => {
+  const q = $('gameName').value.trim();
+  showVerifyResults(q);
+});
+
+function showVerifyResults(query) {
+  const container = $('verifyResults');
+  container.innerHTML = '';
+  if (!query) { container.textContent = 'Type a game name to get suggestions.'; return; }
+  const qlc = query.toLowerCase();
+  const matches = knownGames.filter(g => g.toLowerCase().includes(qlc));
+  if (matches.length) {
+    const list = document.createElement('ul');
+    matches.forEach(m => {
+      const li = document.createElement('li');
+      const btn = document.createElement('button');
+      btn.textContent = m;
+      btn.addEventListener('click', () => { $('gameName').value = m; container.innerHTML = `<div class="suggested">Selected: ${escapeHtml(m)}</div>`; });
+      li.appendChild(btn);
+      list.appendChild(li);
+    });
+    container.appendChild(list);
+  } else {
+    container.innerHTML = `<div>No local matches.</div><div class="search-links">Try a quick web search: <a href="https://www.bing.com/search?q=${encodeURIComponent(query)}" target="_blank" rel="noopener">Search web for '${escapeHtml(query)}'</a></div>`;
+  }
+}
+
+// Stream controls
+$('newStreamBtn').addEventListener('click', () => { streamCount++; saveState(); render(); });
+$('resetStreamsBtn').addEventListener('click', () => { if (confirm('Reset stream count to 0?')) { streamCount = 0; saveState(); render(); }});
+
+// Log controls
+$('clearLogBtn').addEventListener('click', () => { if (confirm('Clear the entire log?')){ logs = []; saveState(); render(); }});
+$('exportBtn').addEventListener('click', () => { const data = { logs, streamCount, timer }; const blob = new Blob([JSON.stringify(data, null, 2)], {type:'application/json'}); const url = URL.createObjectURL(blob); const a = document.createElement('a'); a.href = url; a.download = 'game_log.json'; document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url); });
+$('importBtn').addEventListener('click', () => { $('importArea').classList.remove('hidden'); });
+$('cancelImportBtn').addEventListener('click', () => { $('importArea').classList.add('hidden'); $('importTextarea').value = ''; });
+$('doImportBtn').addEventListener('click', () => {
+  try {
+    const parsed = JSON.parse($('importTextarea').value);
+    if (parsed.logs && Array.isArray(parsed.logs)) logs = parsed.logs;
+    if (typeof parsed.streamCount === 'number') streamCount = parsed.streamCount;
+    saveState(); render(); $('importArea').classList.add('hidden'); $('importTextarea').value = '';
+    alert('Imported');
+  } catch (err) { alert('Invalid JSON'); }
+});
+
+// Timer functions
+$('startBtn').addEventListener('click', () => { startTimer(); });
+$('pauseBtn').addEventListener('click', () => { pauseTimer(); });
+$('resetBtn').addEventListener('click', () => { resetTimer(); });
+$('attachTimeBtn').addEventListener('click', () => { attachTimeToTopEntry(); });
+
+function startTimer() {
+  if (timer.running) return;
+  timer.running = true;
+  timer.startAt = Date.now();
+  saveState();
+  tickTimer();
+  timerInterval = setInterval(tickTimer, 250);
+}
+function pauseTimer() {
+  if (!timer.running) return;
+  timer.elapsedBefore += Date.now() - timer.startAt;
+  timer.running = false;
+  timer.startAt = null;
+  clearInterval(timerInterval); timerInterval = null;
+  saveState();
+  tickTimer();
+}
+function resetTimer() {
+  timer.running = false; timer.startAt = null; timer.elapsedBefore = 0; clearInterval(timerInterval); timerInterval = null; saveState(); tickTimer();
+}
+function tickTimer() {
+  const ms = timer.elapsedBefore + (timer.running ? (Date.now() - timer.startAt) : 0);
+  $('timerDisplay').textContent = msToHMS(ms);
+}
+function msToHMS(ms) {
+  const total = Math.floor(ms/1000);
+  const s = total % 60; const m = Math.floor((total/60)) % 60; const h = Math.floor(total/3600);
+  return [h,m,s].map(n=>String(n).padStart(2,'0')).join(':');
+}
+
+function attachTimeToTopEntry(){
+  if (!logs.length) return alert('No entries in the log to attach to.');
+  const ms = timer.elapsedBefore + (timer.running ? (Date.now() - timer.startAt) : 0);
+  logs[0].duration = msToHMS(ms);
+  saveState(); render();
+}
+
+// Init
+loadState(); render(); tickTimer();
+
+// Basic export safety: keep app usable even if localStorage is missing
+window.addEventListener('beforeunload', saveState);
+
+</script>
+</body>
+</html>
