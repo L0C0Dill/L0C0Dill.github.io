@@ -9,18 +9,49 @@
 <body>
   <header>
     <h1>Game & Stream Counter</h1>
-    <p class="tagline">Log played games, count streams, run a timer, and verify entries.</p>
+    <p class="tagline">Log played games, count streams, measure duration, views & likes, set goals, and manage sessions.</p>
   </header>
 
   <main class="container">
     <section class="panel">
       <h2>Stream Controls</h2>
-      <div class="row">
-        <div>
-          <button id="newStreamBtn">New Stream</button>
-          <button id="resetStreamsBtn">Reset Streams</button>
+      <div class="row controls-top">
+        <div class="stream-buttons">
+          <button id="startStreamBtn">Start</button>
+          <button id="pauseStreamBtn" disabled>Pause</button>
+          <button id="resumeStreamBtn" disabled>Resume</button>
+          <button id="stopStreamBtn" disabled>Stop</button>
+          <button id="resetStreamsBtn">Reset Count</button>
         </div>
-        <div class="counter">Streams: <span id="streamCount">0</span></div>
+
+        <div class="stream-inputs">
+          <label>Title <input id="streamTitle" type="text" placeholder="Optional title"></label>
+          <label>Views <input id="streamViews" type="number" min="0" placeholder="0"></label>
+          <label>Likes <input id="streamLikes" type="number" min="0" placeholder="0"></label>
+          <label>View Goal <input id="streamViewGoal" type="number" min="0" placeholder="goal"></label>
+          <label>Like Goal <input id="streamLikeGoal" type="number" min="0" placeholder="goal"></label>
+        </div>
+
+        <div class="counter" aria-live="polite">
+          Streams: <strong id="streamCount">0</strong><br>
+          Live: <span id="liveState">No</span><br>
+          Live Time: <span id="liveTime">00:00:00</span>
+        </div>
+      </div>
+
+      <div class="stream-aggregates">
+        Totals — Time streamed: <strong id="totalTime">00:00:00</strong> • Views: <strong id="totalViews">0</strong> • Avg views/stream: <strong id="avgViews">0</strong> • Longest: <strong id="longest">00:00:00</strong>
+      </div>
+
+      <div class="row stream-actions">
+        <input id="filterText" placeholder="Search title or game..." />
+        <select id="filterType">
+          <option value="all">All</option>
+          <option value="stream">Streams</option>
+          <option value="game">Games</option>
+        </select>
+        <button id="exportCsvBtn">Export Streams CSV</button>
+        <button id="importCsvBtn">Import CSV</button>
       </div>
     </section>
 
@@ -32,7 +63,7 @@
           <button id="startBtn">Start</button>
           <button id="pauseBtn">Pause</button>
           <button id="resetBtn">Reset</button>
-          <button id="attachTimeBtn" title="Attach elapsed time to the current stream entry (if one is being edited)">Attach Time to Entry</button>
+          <button id="attachTimeBtn" title="Attach elapsed time to the most recent log entry">Attach Time to Top Entry</button>
         </div>
       </div>
     </section>
@@ -55,16 +86,17 @@
     </section>
 
     <section class="panel">
-      <h2>Log</h2>
+      <h2>Log (<span id="visibleCount">0</span>)</h2>
       <div class="row">
         <button id="clearLogBtn">Clear Log</button>
         <button id="exportBtn">Export JSON</button>
         <button id="importBtn">Import JSON</button>
       </div>
+
       <ul id="logList" class="log-list"></ul>
 
       <div id="importArea" class="import-area hidden">
-        <textarea id="importTextarea" placeholder='Paste JSON here'></textarea>
+        <textarea id="importTextarea" placeholder='Paste JSON or CSV here'></textarea>
         <div class="row">
           <button id="doImportBtn">Import</button>
           <button id="cancelImportBtn">Cancel</button>
@@ -72,235 +104,296 @@
       </div>
     </section>
 
-    <footer>
-      <p>Verification is local: suggestions come from a built-in list and a quick web search link if you want to look it up online.</p>
-    </footer>
   </main>
 
+  <!-- Edit modal -->
+  <div id="editModal" class="modal hidden" role="dialog" aria-modal="true">
+    <div class="modal-content">
+      <h3>Edit Entry</h3>
+      <label>Type: <select id="editType"><option value="stream">Stream</option><option value="game">Game</option></select></label>
+      <label>Title / Name <input id="editTitle" type="text"></label>
+      <label>Duration <input id="editDuration" type="text"></label>
+      <label>Views <input id="editViews" type="number" min="0"></label>
+      <label>Likes <input id="editLikes" type="number" min="0"></label>
+      <label>View Goal <input id="editViewGoal" type="number" min="0"></label>
+      <label>Like Goal <input id="editLikeGoal" type="number" min="0"></label>
+      <label>Notes <input id="editNotes" type="text"></label>
+      <div class="row modal-actions">
+        <button id="saveEditBtn">Save</button>
+        <button id="cancelEditBtn">Cancel</button>
+        <button id="deleteEntryBtn" class="danger">Delete</button>
+      </div>
+    </div>
+  </div>
+
 <script>
-// Simple single-file app. Data stored in localStorage so it works offline.
-const STORAGE_KEY = 'gameLogs_v1';
-const STREAM_KEY = 'streamCount_v1';
-const TIMER_KEY = 'timerState_v1';
+// Storage keys
+const STORAGE_KEY = 'gameLogs_v3';
+const STREAM_KEY = 'streamCount_v3';
+const TIMER_KEY = 'timerState_v3';
 
-// A small local list of known games to help verification. Extend as needed.
-const knownGames = [
-  'The Legend of Zelda: Breath of the Wild',
-  'Elden Ring',
-  'Minecraft',
-  'Fortnite',
-  'Overwatch',
-  'Hollow Knight',
-  'Stardew Valley',
-  'Hades',
-  'Animal Crossing: New Horizons',
-  'Skyrim',
-  'Cyberpunk 2077',
-  'Dark Souls III',
-  'Persona 5',
-  'Super Mario Odyssey'
-];
-
-let logs = [];
+// Data
+let logs = []; // newest first
 let streamCount = 0;
 
-// Timer state
-let timer = {
-  running: false,
-  startAt: null, // timestamp when started
-  elapsedBefore: 0 // ms
-};
+// Timers
+let timer = { running:false, startAt:null, elapsedBefore:0 };
 let timerInterval = null;
+let liveTimer = { running:false, startAt:null, elapsedBefore:0 };
+let liveInterval = null;
+let autosaveInterval = null; // for snapshot
 
-// Utility
-function $(id) { return document.getElementById(id); }
-function saveState() {
-  try {
+// Elements
+const $ = id => document.getElementById(id);
+
+// Utilities
+function msToHMS(ms){
+  const total = Math.floor(ms/1000);
+  const s = total % 60;
+  const m = Math.floor(total/60) % 60;
+  const h = Math.floor(total/3600);
+  return [h,m,s].map(n=>String(n).padStart(2,'0')).join(':');
+}
+function parseDurationToMs(str){
+  if (!str) return 0;
+  const parts = String(str).split(':').map(p=>parseInt(p,10)||0);
+  if (parts.length===3) return ((parts[0]*3600)+(parts[1]*60)+parts[2])*1000;
+  if (parts.length===2) return ((parts[0]*60)+parts[1])*1000;
+  if (parts.length===1) return parts[0]*1000;
+  return 0;
+}
+function escapeHtml(s){ return String(s).replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":"&#39;"})[c]); }
+
+// Persistence
+function saveState(){
+  try{
     localStorage.setItem(STORAGE_KEY, JSON.stringify(logs));
     localStorage.setItem(STREAM_KEY, String(streamCount));
     localStorage.setItem(TIMER_KEY, JSON.stringify(timer));
-  } catch (e) {
-    console.warn('Could not save to localStorage', e);
-  }
+  }catch(e){console.warn('save failed',e)}
 }
-function loadState() {
-  try {
+function loadState(){
+  try{
     const raw = localStorage.getItem(STORAGE_KEY);
-    logs = raw ? JSON.parse(raw) : [];
-    streamCount = parseInt(localStorage.getItem(STREAM_KEY) || '0', 10);
-    const rawTimer = localStorage.getItem(TIMER_KEY);
-    timer = rawTimer ? JSON.parse(rawTimer) : timer;
-  } catch (e) {
-    console.warn('Could not load from localStorage', e);
-  }
+    logs = raw? JSON.parse(raw): [];
+    streamCount = parseInt(localStorage.getItem(STREAM_KEY)||'0',10);
+    const rawT = localStorage.getItem(TIMER_KEY);
+    timer = rawT? JSON.parse(rawT): timer;
+  }catch(e){console.warn('load failed',e)}
 }
 
-function render() {
-  $('logList').innerHTML = '';
-  logs.forEach((entry, idx) => {
-    const li = document.createElement('li');
-    li.className = 'log-item';
-    const meta = document.createElement('div');
-    meta.className = 'meta';
-    meta.innerHTML = `<strong>${escapeHtml(entry.name)}</strong> <span class="tag">${escapeHtml(entry.duration || '')}</span>`;
-    const info = document.createElement('div');
-    info.className = 'info';
-    info.textContent = `Added: ${new Date(entry.addedAt).toLocaleString()}`;
-    if (entry.verified) {
-      const v = document.createElement('span'); v.className = 'verified'; v.textContent = 'Verified';
-      meta.appendChild(v);
+// Render
+function render(filterText='', filterType='all'){
+  const list = $('logList'); list.innerHTML='';
+  let totalViews=0, totalMs=0, streamCountShown=0; let longestMs=0; let streamEntries=0;
+  logs.forEach((entry, idx)=>{
+    if (filterType!=='all' && entry.type!==filterType) return;
+    const text = (entry.title||entry.name||'').toLowerCase();
+    if (filterText && !text.includes(filterText.toLowerCase())) return;
+
+    const li = document.createElement('li'); li.className='log-item';
+    const meta = document.createElement('div'); meta.className='meta';
+    const info = document.createElement('div'); info.className='info';
+
+    if (entry.type==='stream'){
+      const title = entry.title?escapeHtml(entry.title):`Stream #${entry.streamNumber}`;
+      meta.innerHTML = `<strong>${title}</strong> <span class="tag">${escapeHtml(entry.duration||'')}</span>`;
+      info.innerHTML = `Added: ${new Date(entry.addedAt).toLocaleString()} • Views: ${entry.views||0} • Likes: ${entry.likes||0}`;
+
+      // goal badges
+      const badges = document.createElement('div'); badges.className='badges';
+      if (entry.viewGoal && (entry.views||0) >= entry.viewGoal){
+        const b = document.createElement('span'); b.className='badge goal-met'; b.textContent = 'View goal met'; badges.appendChild(b);
+      }
+      if (entry.likeGoal && (entry.likes||0) >= entry.likeGoal){
+        const b = document.createElement('span'); b.className='badge goal-met'; b.textContent = 'Like goal met'; badges.appendChild(b);
+      }
+      if (Object.keys(entry).includes('notes') && entry.notes) {
+        const b = document.createElement('span'); b.className='badge note'; b.textContent = 'Notes'; badges.appendChild(b);
+      }
+      info.appendChild(badges);
+
+      // progress bars
+      if (entry.viewGoal || entry.likeGoal){
+        const goals = document.createElement('div'); goals.className='goals';
+        if (entry.viewGoal){
+          const pct = Math.min(100, Math.round(((entry.views||0)/entry.viewGoal)*100));
+          goals.innerHTML += `<div class="goal-row"><div class="goal-label">Views</div><div class="progress"><div class="progress-fill" style="width:${pct}%"></div></div><div class="goal-meta">${entry.views||0}/${entry.viewGoal}</div></div>`;
+        }
+        if (entry.likeGoal){
+          const pctL = Math.min(100, Math.round(((entry.likes||0)/entry.likeGoal)*100));
+          goals.innerHTML += `<div class="goal-row"><div class="goal-label">Likes</div><div class="progress"><div class="progress-fill" style="width:${pctL}%"></div></div><div class="goal-meta">${entry.likes||0}/${entry.likeGoal}</div></div>`;
+        }
+        info.appendChild(goals);
+      }
+
+      // controls
+      const controls = document.createElement('div'); controls.className='controls-item';
+      const editBtn = document.createElement('button'); editBtn.textContent='Edit'; editBtn.className='small-btn';
+      editBtn.addEventListener('click', ()=> openEditModal(idx));
+      const removeBtn = document.createElement('button'); removeBtn.textContent='Remove';
+      removeBtn.addEventListener('click', ()=> { if(confirm('Remove entry?')){ logs.splice(idx,1); saveState(); render($('filterText').value, $('filterType').value); } });
+      controls.appendChild(editBtn); controls.appendChild(removeBtn);
+
+      li.appendChild(meta); li.appendChild(info); li.appendChild(controls);
+
+      totalViews += Number(entry.views||0);
+      const ms = parseDurationToMs(entry.duration||'00:00:00'); totalMs += ms; if (ms>longestMs) longestMs = ms;
+      streamEntries++; streamCountShown++;
     } else {
-      const verifyBadge = document.createElement('button');
-      verifyBadge.textContent = 'Mark verified';
-      verifyBadge.className = 'small-btn';
-      verifyBadge.addEventListener('click', () => { logs[idx].verified = true; saveState(); render(); });
-      meta.appendChild(verifyBadge);
+      // game entry
+      meta.innerHTML = `<strong>${escapeHtml(entry.name)}</strong> <span class="tag">${escapeHtml(entry.duration||'')}</span>`;
+      info.textContent = `Added: ${new Date(entry.addedAt).toLocaleString()}`;
+      const controls = document.createElement('div'); controls.className='controls-item';
+      const editBtn = document.createElement('button'); editBtn.textContent='Edit'; editBtn.className='small-btn';
+      editBtn.addEventListener('click', ()=> openEditModal(idx));
+      const removeBtn = document.createElement('button'); removeBtn.textContent='Remove';
+      removeBtn.addEventListener('click', ()=> { if(confirm('Remove entry?')){ logs.splice(idx,1); saveState(); render($('filterText').value, $('filterType').value); } });
+      controls.appendChild(editBtn); controls.appendChild(removeBtn);
+      li.appendChild(meta); li.appendChild(info); li.appendChild(controls);
+      totalMs += parseDurationToMs(entry.duration||'00:00:00');
     }
+    list.appendChild(li);
+  });
 
-    function resetTimer() {
-        stopTimer();
-        totalSeconds = 0;
-        document.getElementById("timer-display").innerText = "00:00:00";
-    }
+  $('streamCount').textContent = streamCount;
+  $('totalViews').textContent = totalViews;
+  $('totalTime').textContent = msToHMS(totalMs);
+  $('avgViews').textContent = streamEntries? Math.round(totalViews/streamEntries):0;
+  $('longest').textContent = msToHMS(longestMs);
+  $('visibleCount').textContent = list.children.length;
+}
 
-    // 4. DATABASE REGISTRY CROSS-EXAMINATION ENGINE
-    let verifiedGameName = "";
-    let searchTimeout = null;
+// --- Stream controls (start/pause/resume/stop) ---
+$('startStreamBtn').addEventListener('click', ()=>{
+  if (liveTimer.running) return;
+  liveTimer.running = true; liveTimer.startAt = Date.now();
+  $('startStreamBtn').disabled = true; $('pauseStreamBtn').disabled = false; $('stopStreamBtn').disabled = false; $('resumeStreamBtn').disabled = true;
+  $('liveState').textContent = 'Yes';
+  liveTick(); liveInterval = setInterval(liveTick, 250);
+  // autosave snapshot every minute
+  if (!autosaveInterval) autosaveInterval = setInterval(()=>{ saveSnapshot('autosave'); }, 60000);
+});
 
-    function searchGameDB() {
-        clearTimeout(searchTimeout);
-        const query = document.getElementById("game-title").value.trim();
-        const suggestionsBox = document.getElementById("search-suggestions");
-        
-        if (query.length < 3) {
-            suggestionsBox.classList.add("hidden");
-            return;
-        }
+$('pauseStreamBtn').addEventListener('click', ()=>{
+  if (!liveTimer.running) return;
+  liveTimer.elapsedBefore += Date.now() - liveTimer.startAt;
+  liveTimer.running = false; clearInterval(liveInterval); liveInterval=null;
+  $('pauseStreamBtn').disabled = true; $('resumeStreamBtn').disabled = false; $('startStreamBtn').disabled = true; $('stopStreamBtn').disabled = false;
+  $('liveState').textContent = 'Paused';
+});
 
-        searchTimeout = setTimeout(() => {
-            fetch(`https://openlibrary.org{encodeURIComponent(query)}&limit=4`)
-                .then(res => res.json())
-                .then(data => {
-                    suggestionsBox.innerHTML = "";
-                    if (data.docs && data.docs.length > 0) {
-                        suggestionsBox.classList.remove("hidden");
-                        data.docs.forEach(doc => {
-                            const item = document.createElement("div");
-                            item.className = "suggestion-item";
-                            let gameTitleClean = doc.title;
-                            item.innerText = "🎮 " + gameTitleClean;
-                            item.onclick = () => selectVerifiedGame(gameTitleClean);
-                            suggestionsBox.appendChild(item);
-                        });
-                    } else {
-                        const mockMatch = ["elden ring", "minecraft", "call of duty", "fortnite", "gta 5", "halo", "valorant", "counter strike", "apex legends", "league of legends", "wow", "roblox"]
-                            .find(g => g.includes(query.toLowerCase()));
-                        if (mockMatch) {
-                            suggestionsBox.classList.remove("hidden");
-                            const item = document.createElement("div");
-                            item.className = "suggestion-item";
-                            item.innerText = "🎮 " + mockMatch.toUpperCase();
-                            item.onclick = () => selectVerifiedGame(mockMatch.toUpperCase());
-                            suggestionsBox.appendChild(item);
-                        }
-                    }
-                }).catch(() => {
-                    suggestionsBox.classList.add("hidden");
-                });
-        }, 300);
-    }
+$('resumeStreamBtn').addEventListener('click', ()=>{
+  if (liveTimer.running) return;
+  liveTimer.running = true; liveTimer.startAt = Date.now();
+  liveTick(); liveInterval = setInterval(liveTick, 250);
+  $('pauseStreamBtn').disabled = false; $('resumeStreamBtn').disabled = true; $('stopStreamBtn').disabled = false; $('startStreamBtn').disabled = true;
+  $('liveState').textContent = 'Yes';
+});
 
-    function selectVerifiedGame(name) {
-        verifiedGameName = name;
-        document.getElementById("game-title").value = name;
-        document.getElementById("search-suggestions").classList.add("hidden");
-        
-        const badge = document.getElementById("selected-game-badge");
-        badge.innerText = `✓ Verified Registry Match: ${name}`;
-        badge.className = "badge-status verified-success";
-        
-        const btn = document.getElementById("log-submit-btn");
-        btn.classList.remove("disabled");
-        btn.disabled = false;
-    }
+$('stopStreamBtn').addEventListener('click', ()=>{
+  if (!liveTimer.running && !liveTimer.elapsedBefore) return;
+  if (liveTimer.running) liveTimer.elapsedBefore += Date.now()-liveTimer.startAt;
+  liveTimer.running=false; clearInterval(liveInterval); liveInterval=null; if (autosaveInterval){ clearInterval(autosaveInterval); autosaveInterval=null; }
 
-    // 5. SESSION DATA SUBMISSION METRICS
-    function logGameSession() {
-        const hours = document.getElementById("game-hours").value;
-        if (!verifiedGameName || !hours.trim() || hours <= 0) return;
+  const duration = msToHMS(liveTimer.elapsedBefore);
+  const title = $('streamTitle').value.trim() || null;
+  const views = parseInt($('streamViews').value,10) || 0;
+  const likes = parseInt($('streamLikes').value,10) || 0;
+  const viewGoal = parseInt($('streamViewGoal').value,10) || null;
+  const likeGoal = parseInt($('streamLikeGoal').value,10) || null;
 
-        const questList = document.getElementById("quest-list");
-        const logId = "log-" + Date.now();
+  streamCount++;
+  const entry = {
+    type:'stream', streamNumber: streamCount, title, duration, views, likes,
+    viewGoal: viewGoal||null, likeGoal: likeGoal||null, notes:null,
+    addedAt: Date.now()
+  };
+  logs.unshift(entry); saveState(); render($('filterText').value, $('filterType').value);
 
-        const logItem = document.createElement("div");
-        logItem.className = "quest-item game-log-item";
-        logItem.id = logId;
-        logItem.innerHTML = `
-            <span class="quest-text">🎮 Verified Game Log: <strong>${verifiedGameName}</strong> for <strong>${hours} hrs</strong> <span class="verified-tag">✓ Database Authenticated</span></span>
-            <button onclick="removeLog('${logId}')" class="btn delete-btn">Clear</button>
-        `;
+  // reset UI
+  $('startStreamBtn').disabled=false; $('pauseStreamBtn').disabled=true; $('resumeStreamBtn').disabled=true; $('stopStreamBtn').disabled=true;
+  $('streamTitle').value=''; $('streamViews').value=''; $('streamLikes').value=''; $('streamViewGoal').value=''; $('streamLikeGoal').value='';
+  liveTimer = {running:false,startAt:null,elapsedBefore:0}; $('liveTime').textContent='00:00:00'; $('liveState').textContent='No';
+});
 
-        questList.prepend(logItem);
-        
-        document.getElementById("game-title").value = "";
-        document.getElementById("game-hours").value = "";
-        const badge = document.getElementById("selected-game-badge");
-        badge.innerText = "No game verified yet";
-        badge.className = "badge-status hidden";
-        
-        const btn = document.getElementById("log-submit-btn");
-        btn.classList.add("disabled");
-        btn.disabled = true;
-        
-        verifiedGameName = "";
-        gainXP(40); 
-    }
+function liveTick(){
+  const ms = liveTimer.elapsedBefore + (liveTimer.running ? (Date.now()-liveTimer.startAt):0);
+  $('liveTime').textContent = msToHMS(ms);
+}
 
-    function removeLog(id) {
-        const item = document.getElementById(id);
-        if (item) item.remove();
-    }
+function saveSnapshot(kind='manual'){
+  // save a lightweight snapshot entry to logs with kind tag, not incrementing streamCount
+  const ms = liveTimer.elapsedBefore + (liveTimer.running ? (Date.now()-liveTimer.startAt):0);
+  const snapshot = { type:'snapshot', kind, duration: msToHMS(ms), addedAt: Date.now() };
+  // keep snapshots separate (append to end)
+  logs.push(snapshot); saveState();
+}
 
-    // 6. CUSTOM STREAM TASK WORKSPACE
-    function addQuest() {
-        const questText = document.getElementById("quest-input").value;
-        if (!questText.trim()) return;
+// Reset streams count only
+$('resetStreamsBtn').addEventListener('click', ()=>{ if (confirm('Reset stream count to 0? This does not remove entries.')){ streamCount=0; saveState(); render($('filterText').value, $('filterType').value); } });
 
-        const questList = document.getElementById("quest-list");
-        const questId = "quest-" + Date.now();
+// export/import CSV for streams
+$('exportCsvBtn').addEventListener('click', ()=>{
+  const streams = logs.filter(e=>e.type==='stream');
+  const rows = [['streamNumber','title','duration','views','likes','viewGoal','likeGoal','notes','addedAt']];
+  streams.forEach(s=> rows.push([s.streamNumber||'', s.title||'', s.duration||'', s.views||0, s.likes||0, s.viewGoal||'', s.likeGoal||'', s.notes||'', new Date(s.addedAt).toISOString()]));
+  const csv = rows.map(r=> r.map(c=> '"'+String(c).replace(/"/g,'""')+'"').join(',')).join('\n');
+  const blob = new Blob([csv], {type:'text/csv'}); const url = URL.createObjectURL(blob); const a=document.createElement('a'); a.href=url; a.download='streams.csv'; document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url);
+});
 
-        const questItem = document.createElement("div");
-        questItem.className = "quest-item";
-        questItem.id = questId;
-        questItem.innerHTML = `
-            <span class="quest-text">📝 Memo: ${questText}</span>
-            <button onclick="completeQuest('${questId}')" class="btn complete-btn">Clear (+25 XP)</button>
-        `;
+$('importCsvBtn').addEventListener('click', ()=>{ $('importArea').classList.remove('hidden'); $('importTextarea').placeholder='Paste CSV or JSON here. CSV expected columns: streamNumber,title,duration,views,likes,viewGoal,likeGoal,notes,addedAt'; });
 
-        questList.prepend(questItem);
-        document.getElementById("quest-input").value = "";
-    }
+// JSON import/export
+$('exportBtn').addEventListener('click', ()=>{ const data={logs,streamCount, timer}; const blob=new Blob([JSON.stringify(data,null,2)],{type:'application/json'}); const url=URL.createObjectURL(blob); const a=document.createElement('a'); a.href=url; a.download='game_log.json'; document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url); });
+$('importBtn').addEventListener('click', ()=>{ $('importArea').classList.remove('hidden'); $('importTextarea').placeholder='Paste JSON or CSV here'; });
+$('cancelImportBtn').addEventListener('click', ()=>{ $('importArea').classList.add('hidden'); $('importTextarea').value=''; });
+$('doImportBtn').addEventListener('click', ()=>{
+  const raw = $('importTextarea').value.trim(); if (!raw) return; 
+  // try JSON
+  try{ const parsed = JSON.parse(raw); if (parsed.logs && Array.isArray(parsed.logs)){ logs = parsed.logs; if (typeof parsed.streamCount==='number') streamCount=parsed.streamCount; saveState(); render($('filterText').value, $('filterType').value); $('importArea').classList.add('hidden'); $('importTextarea').value=''; alert('Imported JSON'); return; } }catch(e){}
+  // try CSV
+  try{
+    const lines = raw.split(/\r?\n/).filter(Boolean); if (lines.length<2) throw new Error('no csv');
+    const hdr = lines.shift().split(',').map(h=>h.replace(/(^"|"$)/g,''));
+    lines.forEach(l=>{
+      const cols = l.split(/,(?=(?:[^"]*"[^"]*")*[^"]*$)/).map(c=>c.replace(/(^"|"$)/g,''));
+      const obj = {};
+      hdr.forEach((h,i)=> obj[h.trim()]=cols[i]||'');
+      const entry = { type:'stream', streamNumber: Number(obj.streamNumber)||(streamCount+1), title: obj.title||null, duration: obj.duration||'00:00:00', views: Number(obj.views)||0, likes: Number(obj.likes)||0, viewGoal: obj.viewGoal?Number(obj.viewGoal):null, likeGoal: obj.likeGoal?Number(obj.likeGoal):null, notes: obj.notes||null, addedAt: obj.addedAt?Date.parse(obj.addedAt):Date.now() };
+      logs.unshift(entry); if (entry.streamNumber) streamCount = Math.max(streamCount, entry.streamNumber);
+    });
+    saveState(); render($('filterText').value, $('filterType').value); $('importArea').classList.add('hidden'); $('importTextarea').value=''; alert('Imported CSV');
+  }catch(err){ alert('Import failed: '+err.message); }
+});
 
-    function completeQuest(id) {
-        const item = document.getElementById(id);
-        if (!item) return;
-        item.remove();
-        gainXP(25);
-    }
+// Filter/search
+$('filterText').addEventListener('input', ()=> render($('filterText').value, $('filterType').value));
+$('filterType').addEventListener('change', ()=> render($('filterText').value, $('filterType').value));
 
-    // 7. RPG LEVEL INCREMENT FORMULA
-    function gainXP(amount) {
-        currentXP += amount;
-        if (currentXP >= xpNeededForNextLevel) {
-            currentXP = currentXP - xpNeededForNextLevel;
-            currentLevel++;
-            xpNeededForNextLevel = Math.floor(xpNeededForNextLevel * 1.5);
-            alert(`🎉 LEVEL UP! L0C0Dill reached Level ${currentLevel}!`);
-        }
-        document.getElementById("level-display").innerText = currentLevel;
-        document.getElementById("xp-display").innerText = currentXP;
-        document.getElementById("next-level-xp").innerText = xpNeededForNextLevel;
-        const pct = (currentXP / xpNeededForNextLevel) * 100;
-        document.getElementById("xp-bar-fill").style.width = pct + "%";
-    }
+// Game form (unchanged)
+$('gameForm').addEventListener('submit', e=>{ e.preventDefault(); const name=$('gameName').value.trim(); if(!name) return; let duration=$('gameDuration').value.trim(); if(!duration && (timer.elapsedBefore||timer.running)) duration = msToHMS(timer.elapsedBefore + (timer.running?(Date.now()-timer.startAt):0)); const entry={type:'game', name, duration, addedAt:Date.now()}; logs.unshift(entry); saveState(); render($('filterText').value, $('filterType').value); $('gameForm').reset(); });
+
+// Timer panel
+$('startBtn').addEventListener('click', ()=>{ if(timer.running) return; timer.running=true; timer.startAt=Date.now(); tickTimer(); timerInterval=setInterval(tickTimer,250); });
+$('pauseBtn').addEventListener('click', ()=>{ if(!timer.running) return; timer.elapsedBefore += Date.now()-timer.startAt; timer.running=false; clearInterval(timerInterval); timerInterval=null; saveState(); tickTimer(); });
+$('resetBtn').addEventListener('click', ()=>{ timer.running=false; timer.startAt=null; timer.elapsedBefore=0; clearInterval(timerInterval); timerInterval=null; saveState(); tickTimer(); });
+$('attachTimeBtn').addEventListener('click', ()=>{ if(!logs.length) return alert('No entries'); const ms = timer.elapsedBefore + (timer.running?(Date.now()-timer.startAt):0); logs[0].duration = msToHMS(ms); saveState(); render($('filterText').value, $('filterType').value); });
+function tickTimer(){ const ms = timer.elapsedBefore + (timer.running?(Date.now()-timer.startAt):0); $('timerDisplay').textContent = msToHMS(ms); }
+
+// Edit modal logic
+let editingIndex = null;
+function openEditModal(idx){ editingIndex = idx; const e = logs[idx]; $('editType').value = e.type||'stream'; $('editTitle').value = e.title||e.name||''; $('editDuration').value = e.duration||''; $('editViews').value = e.views||0; $('editLikes').value = e.likes||0; $('editViewGoal').value = e.viewGoal||''; $('editLikeGoal').value = e.likeGoal||''; $('editNotes').value = e.notes||''; $('editModal').classList.remove('hidden'); }
+$('cancelEditBtn').addEventListener('click', ()=>{ editingIndex=null; $('editModal').classList.add('hidden'); });
+$('saveEditBtn').addEventListener('click', ()=>{
+  if (editingIndex===null) return; const e = logs[editingIndex]; const type = $('editType').value; const title = $('editTitle').value.trim(); e.type = type; if (type==='stream'){ e.title = title||null; e.duration = $('editDuration').value||e.duration; e.views = Number($('editViews').value)||0; e.likes = Number($('editLikes').value)||0; e.viewGoal = $('editViewGoal').value?Number($('editViewGoal').value):null; e.likeGoal = $('editLikeGoal').value?Number($('editLikeGoal').value):null; } else { e.name = title||e.name; e.duration = $('editDuration').value||e.duration; }
+  e.notes = $('editNotes').value||null; saveState(); render($('filterText').value, $('filterType').value); editingIndex=null; $('editModal').classList.add('hidden'); });
+$('deleteEntryBtn').addEventListener('click', ()=>{ if (editingIndex===null) return; if (!confirm('Delete this entry?')) return; logs.splice(editingIndex,1); saveState(); render($('filterText').value, $('filterType').value); editingIndex=null; $('editModal').classList.add('hidden'); });
+
+// Helpers & init
+loadState(); render(); tickTimer(); liveTick();
+window.addEventListener('beforeunload', saveState);
+
 </script>
+</body>
+</html>
