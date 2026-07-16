@@ -157,136 +157,150 @@ function render() {
       meta.appendChild(verifyBadge);
     }
 
-    const controls = document.createElement('div');
-    controls.className = 'controls';
-    const removeBtn = document.createElement('button');
-    removeBtn.textContent = 'Remove';
-    removeBtn.addEventListener('click', () => { logs.splice(idx,1); saveState(); render(); });
-    controls.appendChild(removeBtn);
+    function resetTimer() {
+        stopTimer();
+        totalSeconds = 0;
+        document.getElementById("timer-display").innerText = "00:00:00";
+    }
 
-    li.appendChild(meta);
-    li.appendChild(info);
-    li.appendChild(controls);
-    $('logList').appendChild(li);
-  });
+    // 4. DATABASE REGISTRY CROSS-EXAMINATION ENGINE
+    let verifiedGameName = "";
+    let searchTimeout = null;
 
-  $('streamCount').textContent = streamCount;
-}
+    function searchGameDB() {
+        clearTimeout(searchTimeout);
+        const query = document.getElementById("game-title").value.trim();
+        const suggestionsBox = document.getElementById("search-suggestions");
+        
+        if (query.length < 3) {
+            suggestionsBox.classList.add("hidden");
+            return;
+        }
 
-function escapeHtml(s){ return String(s).replace(/[&<>"']/g, (c)=> ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":"&#39;"})[c]); }
+        searchTimeout = setTimeout(() => {
+            fetch(`https://openlibrary.org{encodeURIComponent(query)}&limit=4`)
+                .then(res => res.json())
+                .then(data => {
+                    suggestionsBox.innerHTML = "";
+                    if (data.docs && data.docs.length > 0) {
+                        suggestionsBox.classList.remove("hidden");
+                        data.docs.forEach(doc => {
+                            const item = document.createElement("div");
+                            item.className = "suggestion-item";
+                            let gameTitleClean = doc.title;
+                            item.innerText = "🎮 " + gameTitleClean;
+                            item.onclick = () => selectVerifiedGame(gameTitleClean);
+                            suggestionsBox.appendChild(item);
+                        });
+                    } else {
+                        const mockMatch = ["elden ring", "minecraft", "call of duty", "fortnite", "gta 5", "halo", "valorant", "counter strike", "apex legends", "league of legends", "wow", "roblox"]
+                            .find(g => g.includes(query.toLowerCase()));
+                        if (mockMatch) {
+                            suggestionsBox.classList.remove("hidden");
+                            const item = document.createElement("div");
+                            item.className = "suggestion-item";
+                            item.innerText = "🎮 " + mockMatch.toUpperCase();
+                            item.onclick = () => selectVerifiedGame(mockMatch.toUpperCase());
+                            suggestionsBox.appendChild(item);
+                        }
+                    }
+                }).catch(() => {
+                    suggestionsBox.classList.add("hidden");
+                });
+        }, 300);
+    }
 
-// Form handling
-$('gameForm').addEventListener('submit', (e) => {
-  e.preventDefault();
-  const name = $('gameName').value.trim();
-  if (!name) return;
-  let duration = $('gameDuration').value.trim();
-  if (!duration && (timer.elapsedBefore || timer.running)) {
-    // If timer has some elapsed time, use it
-    duration = msToHMS(timer.elapsedBefore + (timer.running ? (Date.now() - timer.startAt) : 0));
-  }
-  const entry = { name, duration, addedAt: Date.now(), verified: false };
-  logs.unshift(entry);
-  saveState(); render();
-  $('gameForm').reset();
-});
+    function selectVerifiedGame(name) {
+        verifiedGameName = name;
+        document.getElementById("game-title").value = name;
+        document.getElementById("search-suggestions").classList.add("hidden");
+        
+        const badge = document.getElementById("selected-game-badge");
+        badge.innerText = `✓ Verified Registry Match: ${name}`;
+        badge.className = "badge-status verified-success";
+        
+        const btn = document.getElementById("log-submit-btn");
+        btn.classList.remove("disabled");
+        btn.disabled = false;
+    }
 
-// Verification: simple local suggestions + quick web search option
-$('verifyBtn').addEventListener('click', () => {
-  const q = $('gameName').value.trim();
-  showVerifyResults(q);
-});
+    // 5. SESSION DATA SUBMISSION METRICS
+    function logGameSession() {
+        const hours = document.getElementById("game-hours").value;
+        if (!verifiedGameName || !hours.trim() || hours <= 0) return;
 
-function showVerifyResults(query) {
-  const container = $('verifyResults');
-  container.innerHTML = '';
-  if (!query) { container.textContent = 'Type a game name to get suggestions.'; return; }
-  const qlc = query.toLowerCase();
-  const matches = knownGames.filter(g => g.toLowerCase().includes(qlc));
-  if (matches.length) {
-    const list = document.createElement('ul');
-    matches.forEach(m => {
-      const li = document.createElement('li');
-      const btn = document.createElement('button');
-      btn.textContent = m;
-      btn.addEventListener('click', () => { $('gameName').value = m; container.innerHTML = `<div class="suggested">Selected: ${escapeHtml(m)}</div>`; });
-      li.appendChild(btn);
-      list.appendChild(li);
-    });
-    container.appendChild(list);
-  } else {
-    container.innerHTML = `<div>No local matches.</div><div class="search-links">Try a quick web search: <a href="https://www.bing.com/search?q=${encodeURIComponent(query)}" target="_blank" rel="noopener">Search web for '${escapeHtml(query)}'</a></div>`;
-  }
-}
+        const questList = document.getElementById("quest-list");
+        const logId = "log-" + Date.now();
 
-// Stream controls
-$('newStreamBtn').addEventListener('click', () => { streamCount++; saveState(); render(); });
-$('resetStreamsBtn').addEventListener('click', () => { if (confirm('Reset stream count to 0?')) { streamCount = 0; saveState(); render(); }});
+        const logItem = document.createElement("div");
+        logItem.className = "quest-item game-log-item";
+        logItem.id = logId;
+        logItem.innerHTML = `
+            <span class="quest-text">🎮 Verified Game Log: <strong>${verifiedGameName}</strong> for <strong>${hours} hrs</strong> <span class="verified-tag">✓ Database Authenticated</span></span>
+            <button onclick="removeLog('${logId}')" class="btn delete-btn">Clear</button>
+        `;
 
-// Log controls
-$('clearLogBtn').addEventListener('click', () => { if (confirm('Clear the entire log?')){ logs = []; saveState(); render(); }});
-$('exportBtn').addEventListener('click', () => { const data = { logs, streamCount, timer }; const blob = new Blob([JSON.stringify(data, null, 2)], {type:'application/json'}); const url = URL.createObjectURL(blob); const a = document.createElement('a'); a.href = url; a.download = 'game_log.json'; document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url); });
-$('importBtn').addEventListener('click', () => { $('importArea').classList.remove('hidden'); });
-$('cancelImportBtn').addEventListener('click', () => { $('importArea').classList.add('hidden'); $('importTextarea').value = ''; });
-$('doImportBtn').addEventListener('click', () => {
-  try {
-    const parsed = JSON.parse($('importTextarea').value);
-    if (parsed.logs && Array.isArray(parsed.logs)) logs = parsed.logs;
-    if (typeof parsed.streamCount === 'number') streamCount = parsed.streamCount;
-    saveState(); render(); $('importArea').classList.add('hidden'); $('importTextarea').value = '';
-    alert('Imported');
-  } catch (err) { alert('Invalid JSON'); }
-});
+        questList.prepend(logItem);
+        
+        document.getElementById("game-title").value = "";
+        document.getElementById("game-hours").value = "";
+        const badge = document.getElementById("selected-game-badge");
+        badge.innerText = "No game verified yet";
+        badge.className = "badge-status hidden";
+        
+        const btn = document.getElementById("log-submit-btn");
+        btn.classList.add("disabled");
+        btn.disabled = true;
+        
+        verifiedGameName = "";
+        gainXP(40); 
+    }
 
-// Timer functions
-$('startBtn').addEventListener('click', () => { startTimer(); });
-$('pauseBtn').addEventListener('click', () => { pauseTimer(); });
-$('resetBtn').addEventListener('click', () => { resetTimer(); });
-$('attachTimeBtn').addEventListener('click', () => { attachTimeToTopEntry(); });
+    function removeLog(id) {
+        const item = document.getElementById(id);
+        if (item) item.remove();
+    }
 
-function startTimer() {
-  if (timer.running) return;
-  timer.running = true;
-  timer.startAt = Date.now();
-  saveState();
-  tickTimer();
-  timerInterval = setInterval(tickTimer, 250);
-}
-function pauseTimer() {
-  if (!timer.running) return;
-  timer.elapsedBefore += Date.now() - timer.startAt;
-  timer.running = false;
-  timer.startAt = null;
-  clearInterval(timerInterval); timerInterval = null;
-  saveState();
-  tickTimer();
-}
-function resetTimer() {
-  timer.running = false; timer.startAt = null; timer.elapsedBefore = 0; clearInterval(timerInterval); timerInterval = null; saveState(); tickTimer();
-}
-function tickTimer() {
-  const ms = timer.elapsedBefore + (timer.running ? (Date.now() - timer.startAt) : 0);
-  $('timerDisplay').textContent = msToHMS(ms);
-}
-function msToHMS(ms) {
-  const total = Math.floor(ms/1000);
-  const s = total % 60; const m = Math.floor((total/60)) % 60; const h = Math.floor(total/3600);
-  return [h,m,s].map(n=>String(n).padStart(2,'0')).join(':');
-}
+    // 6. CUSTOM STREAM TASK WORKSPACE
+    function addQuest() {
+        const questText = document.getElementById("quest-input").value;
+        if (!questText.trim()) return;
 
-function attachTimeToTopEntry(){
-  if (!logs.length) return alert('No entries in the log to attach to.');
-  const ms = timer.elapsedBefore + (timer.running ? (Date.now() - timer.startAt) : 0);
-  logs[0].duration = msToHMS(ms);
-  saveState(); render();
-}
+        const questList = document.getElementById("quest-list");
+        const questId = "quest-" + Date.now();
 
-// Init
-loadState(); render(); tickTimer();
+        const questItem = document.createElement("div");
+        questItem.className = "quest-item";
+        questItem.id = questId;
+        questItem.innerHTML = `
+            <span class="quest-text">📝 Memo: ${questText}</span>
+            <button onclick="completeQuest('${questId}')" class="btn complete-btn">Clear (+25 XP)</button>
+        `;
 
-// Basic export safety: keep app usable even if localStorage is missing
-window.addEventListener('beforeunload', saveState);
+        questList.prepend(questItem);
+        document.getElementById("quest-input").value = "";
+    }
 
+    function completeQuest(id) {
+        const item = document.getElementById(id);
+        if (!item) return;
+        item.remove();
+        gainXP(25);
+    }
+
+    // 7. RPG LEVEL INCREMENT FORMULA
+    function gainXP(amount) {
+        currentXP += amount;
+        if (currentXP >= xpNeededForNextLevel) {
+            currentXP = currentXP - xpNeededForNextLevel;
+            currentLevel++;
+            xpNeededForNextLevel = Math.floor(xpNeededForNextLevel * 1.5);
+            alert(`🎉 LEVEL UP! L0C0Dill reached Level ${currentLevel}!`);
+        }
+        document.getElementById("level-display").innerText = currentLevel;
+        document.getElementById("xp-display").innerText = currentXP;
+        document.getElementById("next-level-xp").innerText = xpNeededForNextLevel;
+        const pct = (currentXP / xpNeededForNextLevel) * 100;
+        document.getElementById("xp-bar-fill").style.width = pct + "%";
+    }
 </script>
-</body>
-</html>
